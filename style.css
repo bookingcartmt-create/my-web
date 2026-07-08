@@ -1,9 +1,99 @@
-body {
-  font-family: Arial, sans-serif;
-  text-align: center;
-  margin-top: 50px;
-  background-color: #f0f0f0;
+:root{
+  --bg:#F4F5F1;
+  --surface:#FFFFFF;
+  --ink:#1E2B24;
+  --ink-secondary:#5B6660;
+  --ink-muted:#8B948D;
+  --accent:#2E6B4C;
+  --accent-dark:#1D4732;
+  --accent-soft:#E4EEE7;
+  --line:#DBE1DA;
+  --error:#B3311C;
+  --error-soft:#F8E7E4;
+  --radius:12px;
 }
-h1 {
-  color: #0066cc;
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:'Sarabun','Noto Sans Thai',system-ui,sans-serif;
+  line-height:1.6;
+  padding:48px 20px 80px;
+}
+.wrap{max-width:640px;margin:0 auto;text-align:center;}
+
+h1{
+  font-size:24px;
+  font-weight:700;
+  color:var(--accent-dark);
+  margin:0 0 6px;
+}
+.subtitle{
+  font-size:13.5px;
+  color:var(--ink-muted);
+  margin:0 0 32px;
+}
+
+/* loading state */
+.state{padding:40px 0;}
+.spinner{
+  width:32px;height:32px;margin:0 auto 14px;
+  border:3px solid var(--line);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.state p{color:var(--ink-secondary);font-size:14px;margin:0;}
+
+/* error state */
+.error{
+  background:var(--error-soft);
+  border:1px solid #E8B8AF;
+  border-radius:var(--radius);
+  padding:24px;
+}
+.error-title{color:var(--error);font-weight:700;font-size:15px;margin:0 0 6px;}
+.error-detail{color:var(--error);font-size:13px;margin:0;word-break:break-word;}
+
+/* data cards */
+.cards{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+  text-align:left;
+}
+@media (max-width:520px){
+  .cards{grid-template-columns:1fr;}
+}
+.card{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:18px 20px;
+  border-top:3px solid var(--accent);
+}
+.card .label{
+  font-size:12px;
+  color:var(--ink-muted);
+  font-weight:600;
+  margin:0 0 6px;
+  text-transform:uppercase;
+  letter-spacing:.3px;
+}
+.card .value{
+  font-size:20px;
+  font-weight:700;
+  color:var(--ink);
+  margin:0;
+  word-break:break-word;
+}
+.card.wide{grid-column:1 / -1;}
+.card.status .value{
+  display:inline-flex;align-items:center;gap:6px;
+  color:var(--accent-dark);
+}
+.card.status .dot{
+  width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none;
 }
