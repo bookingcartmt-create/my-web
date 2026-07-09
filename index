@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Math Game - Catch the Answer</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* แก้ไขปัญหา Double Flip (กลับด้านซ้ำซ้อน) ทำให้เคลื่อนไหวมือเหมือนกระจกเงา */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Sarabun', sans-serif; }
+        .glow-text {
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.8), 0 0 20px rgba(0, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body class="w-full h-screen relative text-white select-none">
+
+    <video id="webcam" class="absolute top-0 left-0 w-full h-full object-cover mirror" autoplay playsinline></video>
+    <canvas id="gameCanvas" class="absolute top-0 left-0 w-full h-full object-cover mirror z-10"></canvas>
+
+    <div id="hud" class="hidden absolute top-0 left-0 w-full p-4 z-20 flex justify-between items-start pointer-events-none">
+        <div class="bg-blue-600/80 px-6 py-3 rounded-2xl shadow-lg border-2 border-blue-300">
+            <h2 class="text-2xl font-bold">คะแนน: <span id="scoreDisplay">0</span></h2>
+            <p class="text-sm">แตะสำเร็จ: <span id="hitDisplay">0</span></p>
+        </div>
+        <div class="bg-red-600/80 px-6 py-3 rounded-2xl shadow-lg border-2 border-red-300">
+            <h2 class="text-3xl font-bold">เวลา: <span id="timeDisplay">60</span>s</h2>
+        </div>
+    </div>
+
+    <div id="mathProblem" class="hidden absolute top-[15%] left-1/2 transform -translate-x-1/2 z-20 pointer-events-none">
+        <h1 id="questionText" class="text-7xl md:text-9xl font-extrabold text-white glow-text text-center drop-shadow-2xl">5 + 3 = ?</h1>
+    </div>
+
+    <div id="mainMenu" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center z-50">
+        <h1 class="text-5xl md:text-7xl font-bold mb-8 text-yellow-400 drop-shadow-lg text-center">AR Math Game<br><span class="text-3xl text-white">ใช้มือแตะคำตอบ</span></h1>
+        <input type="text" id="playerName" placeholder="กรอกชื่อผู้เล่น" class="mb-4 px-6 py-3 rounded-full text-black text-xl text-center border-4 border-blue-400 focus:outline-none">
+        <div class="flex gap-4">
+            <button onclick="startGame()" class="px-8 py-4 bg-green-500 hover:bg-green-600 rounded-full text-2xl font-bold shadow-[0_0_15px_rgba(34,197,94,0.6)] transition-all transform hover:scale-105">เริ่มเกม</button>
+            <button onclick="showTeacherMode()" class="px-8 py-4 bg-blue-500 hover:bg-blue-600 rounded-full text-2xl font-bold shadow-[0_0_15px_rgba(59,130,246,0.6)] transition-all transform hover:scale-105">โหมดครู</button>
+            <button onclick="showLeaderboard()" class="px-8 py-4 bg-purple-500 hover:bg-purple-600 rounded-full text-2xl font-bold shadow-[0_0_15px_rgba(168,85,247,0.6)] transition-all transform hover:scale-105">ตารางคะแนน</button>
+        </div>
+        <p class="mt-6 text-gray-300">รอการโหลดกล้องและ AI (อาจใช้เวลาสักครู่)</p>
+        <p id="loadingStatus" class="text-yellow-400 font-bold mt-2">กำลังเตรียมระบบ AI...</p>
+    </div>
+
+    <div id="teacherMode" class="hidden absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center z-50 p-4">
+        <div class="bg-white text-black p-8 rounded-3xl w-full max-w-lg shadow-2xl">
+            <h2 class="text-3xl font-bold mb-6 text-center text-blue-600">ตั้งค่าโหมดครู</h2>
+            
+            <div class="mb-4">
+                <label class="block font-bold mb-2">เวลาแข่งขัน (วินาที):</label>
+                <select id="configTime" class="w-full p-2 border rounded-lg text-lg">
+                    <option value="60">60 วินาที</option>
+                    <option value="90">90 วินาที</option>
+                    <option value="120">120 วินาที</option>
+                </select>
+            </div>
+
+            <div class="mb-4">
+                <label class="block font-bold mb-2">จำนวนลูกบอลคำตอบ (2-5):</label>
+                <input type="number" id="configBalls" min="2" max="5" value="3" class="w-full p-2 border rounded-lg text-lg">
+            </div>
+
+            <div class="mb-4">
+                <label class="block font-bold mb-2">สีกรอบลูกบอล:</label>
+                <input type="color" id="configColor" value="#FFFFFF" class="w-full h-10 p-1 border rounded-lg cursor-pointer">
+            </div>
+
+            <div class="mb-6">
+                <label class="block font-bold mb-2">โหมดผู้เล่น:</label>
+                <select id="configMode" class="w-full p-2 border rounded-lg text-lg">
+                    <option value="single">เล่นเดี่ยว (Single Player)</option>
+                    <option value="multi">เล่นหลายคน (Multiplayer - ผลัดกันเล่น)</option>
+                </select>
+            </div>
+
+            <div class="flex justify-between mt-8">
+                <button onclick="hideTeacherMode()" class="px-6 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-xl font-bold">ยกเลิก</button>
+                <button onclick="saveConfig()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold">บันทึกการตั้งค่า</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="gameOver" class="hidden absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-50">
+        <h1 class="text-6xl font-bold text-red-500 mb-4 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]">หมดเวลา!</h1>
+        <div class="bg-white/10 p-8 rounded-3xl border border-white/20 text-center backdrop-blur-sm">
+            <h2 class="text-3xl mb-2">ผู้เล่น: <span id="goName" class="font-bold text-yellow-400"></span></h2>
+            <h3 class="text-5xl font-bold mb-4">คะแนนรวม: <span id="goScore" class="text-green-400">0</span></h3>
+            <p class="text-xl">ตอบถูกทั้งหมด: <span id="goHits" class="font-bold">0</span> ครั้ง</p>
+        </div>
+        <div class="mt-8 flex gap-4">
+            <button onclick="resetToMenu()" class="px-8 py-4 bg-blue-500 hover:bg-blue-600 rounded-full text-2xl font-bold shadow-lg transition-transform hover:scale-105">กลับหน้าหลัก</button>
+            <button onclick="showLeaderboard()" class="px-8 py-4 bg-purple-500 hover:bg-purple-600 rounded-full text-2xl font-bold shadow-lg transition-transform hover:scale-105">ดูตารางคะแนน</button>
+        </div>
+    </div>
+
+    <div id="leaderboard" class="hidden absolute inset-0 bg-indigo-900/90 flex flex-col items-center justify-start z-50 p-8 overflow-y-auto">
+        <h1 class="text-5xl font-bold text-yellow-400 mb-8 drop-shadow-lg">Top 10 นักคณิตศาสตร์</h1>
+        <div class="w-full max-w-2xl bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20">
+            <table class="w-full text-left text-lg">
+                <thead>
+                    <tr class="border-b-2 border-white/30 text-gray-300">
+                        <th class="pb-2">อันดับ</th>
+                        <th class="pb-2">ชื่อผู้เล่น</th>
+                        <th class="pb-2 text-right">คะแนน</th>
+                        <th class="pb-2 text-right">วันที่เล่น</th>
+                    </tr>
+                </thead>
+                <tbody id="leaderboardBody">
+                    </tbody>
+            </table>
+        </div>
+        <button onclick="closeLeaderboard()" class="mt-8 px-8 py-3 bg-red-500 hover:bg-red-600 rounded-full text-xl font-bold shadow-lg transition-transform hover:scale-105">ปิด</button>
+    </div>
+
+    <script>
+        // --- Web Audio API (Synthesizer สำหรับสร้างเสียงตบมือ/เตือน โดยไม่ต้องใช้ไฟล์) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            if (type === 'correct') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'wrong') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+            }
+        }
+
+        // --- Game Configuration & Variables ---
+        let config = {
+            duration: 60,
+            ballCount: 3,
+            borderColor: '#FFFFFF'
+        };
+        const defaultColors = ['#F97316', '#22C55E', '#3B82F6', '#A855F7', '#EAB308']; 
+
+        let gameState = 'menu'; 
+        let score = 0;
+        let hits = 0;
+        let timeLeft = 0;
+        let timerInterval;
+        let currentAnswer = 0;
+        let balls = [];
+        let currentPlayer = "Unknown";
+        
+        // Hand Tracking Variables
+        let cursor = { x: -100, y: -100, radius: 25 };
+        let smoothedCursor = { x: window.innerWidth/2, y: window.innerHeight/2 };
+        const SMOOTHING = 0.3;
+        let canTouch = true; 
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('webcam');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- Math Logic ---
+        function generateMathProblem() {
+            const ops = ['+', '-', '*'];
+            const op = ops[Math.floor(Math.random() * ops.length)];
+            let num1 = Math.floor(Math.random() * 9) + 1;
+            let num2 = Math.floor(Math.random() * 9) + 1;
+            
+            if (op === '-' && num1 < num2) {
+                let temp = num1; num1 = num2; num2 = temp;
+            }
+
+            let question = `${num1} ${op} ${num2}`;
+            
+            if (op === '+') currentAnswer = num1 + num2;
+            else if (op === '-') currentAnswer = num1 - num2;
+            else if (op === '*') currentAnswer = num1 * num2;
+
+            document.getElementById('questionText').innerText = `${question} = ?`;
+            spawnBalls();
+        }
+
+        class Ball {
+            constructor(x, y, radius, color, text, isCorrect) {
+                this.x = x;
+                this.y = y;
+                this.dx = (Math.random() - 0.5) * 8; 
+                this.dy = (Math.random() - 0.5) * 8; 
+                this.radius = radius;
+                this.color = color;
+                this.text = text;
+                this.isCorrect = isCorrect;
+            }
+
+           draw(ctx) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = config.borderColor;
+                ctx.stroke();
+                ctx.closePath();
+
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 40px Sarabun';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = 'black';
+                ctx.shadowBlur = 5;
+                
+                // --- แก้ไขปัญหาตัวเลขกลับด้าน ---
+                ctx.save(); 
+                ctx.translate(this.x, this.y); 
+                ctx.scale(-1, 1); 
+                ctx.fillText(this.text, 0, 0); 
+                ctx.restore(); 
+                // ---------------------------------
+                
+                ctx.shadowBlur = 0; 
+            }
+
+            update() {
+                if (this.x + this.radius > canvas.width || this.x - this.radius < 0) this.dx = -this.dx;
+                if (this.y + this.radius > canvas.height || this.y - this.radius < 0) this.dy = -this.dy;
+                
+                this.x += this.dx;
+                this.y += this.dy;
+                this.draw(ctx);
+            }
+        }
+
+        function spawnBalls() {
+            balls = [];
+            let answers = [currentAnswer];
+            
+            while(answers.length < config.ballCount) {
+                let offset = Math.floor(Math.random() * 10) - 5;
+                if (offset === 0) offset = 1;
+                let wrong = currentAnswer + offset;
+                if (wrong >= 0 && !answers.includes(wrong)) {
+                    answers.push(wrong);
+                }
+            }
+
+            answers = answers.sort(() => Math.random() - 0.5);
+
+            for (let i = 0; i < config.ballCount; i++) {
+                let x = Math.random() * (canvas.width - 200) + 100;
+                let y = Math.random() * (canvas.height - 200) + 100;
+                let isCorrect = answers[i] === currentAnswer;
+                balls.push(new Ball(x, y, 60, defaultColors[i % defaultColors.length], answers[i].toString(), isCorrect));
+            }
+        }
+
+        // --- Render Loop & Game Mechanics ---
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === 'playing') {
+                balls.forEach(ball => ball.update());
+
+                smoothedCursor.x += (cursor.x - smoothedCursor.x) * SMOOTHING;
+                smoothedCursor.y += (cursor.y - smoothedCursor.y) * SMOOTHING;
+
+                if (cursor.x !== -100) {
+                    ctx.beginPath();
+                    ctx.arc(smoothedCursor.x, smoothedCursor.y, cursor.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.8)'; 
+                    ctx.shadowColor = 'cyan';
+                    ctx.shadowBlur = 20;
+                    ctx.fill();
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = 'white';
+                    ctx.stroke();
+                    ctx.closePath();
+                    ctx.shadowBlur = 0; 
+                }
+
+                if (canTouch) {
+                    for (let i = 0; i < balls.length; i++) {
+                        let ball = balls[i];
+                        let dx = smoothedCursor.x - ball.x;
+                        let dy = smoothedCursor.y - ball.y;
+                        let distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < cursor.radius + ball.radius) {
+                            handleTouch(ball);
+                            break;
+                        }
+                    }
+                }
+            }
+            requestAnimationFrame(render);
+        }
+
+        function handleTouch(ball) {
+            canTouch = false; 
+            if (ball.isCorrect) {
+                playSound('correct');
+                score += 10;
+                hits += 1;
+                createParticles(ball.x, ball.y, '#22C55E'); 
+            } else {
+                playSound('wrong');
+                score -= 5;
+                createParticles(ball.x, ball.y, '#EF4444'); 
+            }
+            
+            updateHUD();
+            
+            setTimeout(() => {
+                generateMathProblem();
+                canTouch = true;
+            }, 500);
+        }
+
+        function updateHUD() {
+            document.getElementById('scoreDisplay').innerText = score;
+            document.getElementById('hitDisplay').innerText = hits;
+        }
+
+        // --- Visual Effects ---
+        let particles = [];
+        function createParticles(x, y, color) {
+            let flash = document.createElement('div');
+            flash.style.position = 'absolute';
+            flash.style.inset = '0';
+            flash.style.backgroundColor = color;
+            flash.style.opacity = '0.3';
+            flash.style.transition = 'opacity 0.5s ease-out';
+            flash.style.pointerEvents = 'none';
+            flash.style.zIndex = '15';
+            document.body.appendChild(flash);
+            
+            setTimeout(() => {
+                flash.style.opacity = '0';
+                setTimeout(() => flash.remove(), 500);
+            }, 50);
+        }
+
+        // --- MediaPipe Hands Setup ---
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1, 
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults((results) => {
+            if (gameState !== 'playing') return;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const indexFinger = results.multiHandLandmarks[0][8];
+                
+                // *** สำคัญ: แก้ไขการสะท้อนกลับด้านซ้ายขวาของมือ ***
+                // ใช้ค่า x โดยตรงเพื่อการขยับที่เป็นไปในทิศทางเดียวกับมือของคุณ (เมื่อ Canvas ใช้ scaleX(-1))
+                cursor.x = indexFinger.x * canvas.width; 
+                cursor.y = indexFinger.y * canvas.height;
+            } else {
+                cursor.x = -100;
+                cursor.y = -100;
+            }
+        });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start().then(() => {
+            document.getElementById('loadingStatus').innerText = "กล้องและ AI พร้อมใช้งานแล้ว!";
+            document.getElementById('loadingStatus').classList.replace('text-yellow-400', 'text-green-400');
+        });
+
+        // --- Game Flow Control ---
+        function startGame() {
+            let nameInput = document.getElementById('playerName').value.trim();
+            currentPlayer = nameInput !== "" ? nameInput : "นักเรียนนิรนาม";
+            
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('mathProblem').classList.remove('hidden');
+            
+            score = 0;
+            hits = 0;
+            timeLeft = config.duration;
+            gameState = 'playing';
+            updateHUD();
+            document.getElementById('timeDisplay').innerText = timeLeft;
+            
+            generateMathProblem();
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('timeDisplay').innerText = timeLeft;
+                if(timeLeft <= 0) {
+                    endGame();
+                }
+            }, 1000);
+
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function endGame() {
+            clearInterval(timerInterval);
+            gameState = 'gameover';
+            balls = []; 
+            
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('mathProblem').classList.add('hidden');
+            document.getElementById('gameOver').classList.remove('hidden');
+            
+            document.getElementById('goName').innerText = currentPlayer;
+            document.getElementById('goScore').innerText = score;
+            document.getElementById('goHits').innerText = hits;
+
+            saveScore(currentPlayer, score);
+        }
+
+        function resetToMenu() {
+            document.getElementById('gameOver').classList.add('hidden');
+            document.getElementById('mainMenu').classList.remove('hidden');
+            gameState = 'menu';
+        }
+
+        // --- Teacher Mode Logic ---
+        function showTeacherMode() {
+            document.getElementById('teacherMode').classList.remove('hidden');
+        }
+
+        function hideTeacherMode() {
+            document.getElementById('teacherMode').classList.add('hidden');
+        }
+
+        function saveConfig() {
+            config.duration = parseInt(document.getElementById('configTime').value);
+            config.ballCount = parseInt(document.getElementById('configBalls').value);
+            config.borderColor = document.getElementById('configColor').value;
+            hideTeacherMode();
+            alert("บันทึกการตั้งค่าเรียบร้อยแล้ว!");
+        }
+
+        // --- Leaderboard Logic (Local Storage) ---
+        function saveScore(name, finalScore) {
+            let leaderboardData = JSON.parse(localStorage.getItem('arMathLeaderboard')) || [];
+            let date = new Date().toLocaleDateString('th-TH');
+            
+            leaderboardData.push({ name, score: finalScore, date });
+            leaderboardData.sort((a, b) => b.score - a.score);
+            leaderboardData = leaderboardData.slice(0, 10);
+            
+            localStorage.setItem('arMathLeaderboard', JSON.stringify(leaderboardData));
+        }
+
+        function showLeaderboard() {
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('gameOver').classList.add('hidden');
+            document.getElementById('leaderboard').classList.remove('hidden');
+            
+            let leaderboardData = JSON.parse(localStorage.getItem('arMathLeaderboard')) || [];
+            let tbody = document.getElementById('leaderboardBody');
+            tbody.innerHTML = '';
+
+            if(leaderboardData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4">ยังไม่มีข้อมูลคะแนน</td></tr>';
+            } else {
+                leaderboardData.forEach((entry, index) => {
+                    let rankColor = index === 0 ? 'text-yellow-400 font-bold' : (index === 1 ? 'text-gray-300' : (index === 2 ? 'text-amber-600' : 'text-white'));
+                    let row = `
+                        <tr class="border-b border-white/10 hover:bg-white/5 transition-colors">
+                            <td class="py-3 ${rankColor}">${index + 1}</td>
+                            <td class="py-3">${entry.name}</td>
+                            <td class="py-3 text-right text-green-400 font-bold">${entry.score}</td>
+                            <td class="py-3 text-right text-sm text-gray-300">${entry.date}</td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            }
+        }
+
+        function closeLeaderboard() {
+            document.getElementById('leaderboard').classList.add('hidden');
+            if(gameState === 'gameover') {
+                document.getElementById('gameOver').classList.remove('hidden');
+            } else {
+                document.getElementById('mainMenu').classList.remove('hidden');
+            }
+        }
+
+        render();
+    </script>
+</body>
+</html>
